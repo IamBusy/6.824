@@ -64,7 +64,7 @@ func doReduce(
 		json.Unmarshal(readBytes, &kvs)
 		for _, kv := range kvs {
 			if values, ok := sortedKeyValues[kv.Key]; ok {
-				values = append(values, kv.Value)
+				sortedKeyValues[kv.Key] = append(values, kv.Value)
 			} else {
 				sortedKeyValues[kv.Key] = []string{kv.Value}
 			}
