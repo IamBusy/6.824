@@ -1,5 +1,13 @@
 package mapreduce
 
+import (
+	"io/ioutil"
+	"encoding/json"
+	"sort"
+	"log"
+	"os"
+)
+
 func doReduce(
 	jobName string, // the name of the whole MapReduce job
 	reduceTask int, // which reduce task this is
@@ -44,4 +52,43 @@ func doReduce(
 	//
 	// Your code here (Part I).
 	//
+	log.Println("Reducer: start reducing")
+
+	var sortedKeyValues = map[string][]string{}
+	for i:=0; i<nMap ; i++  {
+		readBytes, err := ioutil.ReadFile(reduceName(jobName, i, reduceTask))
+		if err != nil {
+			log.Fatal("Read internal file error: ", err)
+		}
+		var kvs []KeyValue
+		json.Unmarshal(readBytes, &kvs)
+		for _, kv := range kvs {
+			if values, ok := sortedKeyValues[kv.Key]; ok {
+				values = append(values, kv.Value)
+			} else {
+				sortedKeyValues[kv.Key] = []string{kv.Value}
+			}
+		}
+	}
+
+	fp, err := os.OpenFile(outFile, os.O_CREATE|os.O_TRUNC|os.O_APPEND|os.O_WRONLY, 0777)
+	defer fp.Close()
+
+	if err != nil {
+		log.Fatalln("Reducer: open output file err, ", err)
+	}
+	out := json.NewEncoder(fp)
+
+	result := map[string]string{}
+	for k, vs := range sortedKeyValues {
+		sort.Strings(vs)
+		result[k] = reduceF(k, vs)
+		err := out.Encode(KeyValue{k, reduceF(k, vs)})
+		if err != nil {
+			log.Fatalln("Reducer: encode err, ", err)
+		}
+	}
+
+	log.Println("Reducer: finish reduce")
+
 }

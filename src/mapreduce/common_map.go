@@ -2,6 +2,10 @@ package mapreduce
 
 import (
 	"hash/fnv"
+
+	"io/ioutil"
+	"encoding/json"
+	"log"
 )
 
 func doMap(
@@ -53,6 +57,27 @@ func doMap(
 	//
 	// Your code here (Part I).
 	//
+	log.Println("Mapper: start doing map")
+	res,_ := ioutil.ReadFile(inFile)
+	keyValues := mapF(inFile, string(res[:]))
+	shuffle := map[int][]KeyValue{}
+	for _, keyValue := range keyValues {
+		reduceIdx := ihash(keyValue.Key) % nReduce
+		if vs, ok := shuffle[reduceIdx]; ok {
+			shuffle[reduceIdx] = append(vs, keyValue)
+		} else {
+			shuffle[reduceIdx] = []KeyValue{keyValue}
+		}
+	}
+	for reduceIdx, v := range shuffle {
+		byteOut, err := json.Marshal(v)
+		if err != nil {
+			log.Fatal("Error occurred when marshall mapper results: ", keyValues)
+		}
+		outFile := reduceName(jobName, mapTask, reduceIdx)
+		ioutil.WriteFile(outFile, byteOut, 0777)
+		log.Println("Mapper: finish mapping, outFile is:", outFile)
+	}
 }
 
 func ihash(s string) int {
