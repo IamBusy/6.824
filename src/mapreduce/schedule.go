@@ -35,37 +35,95 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	// Your code here (Part III, Part IV).
 	//
 	var waiter sync.WaitGroup
-	doneWorkers := make(chan string)
+	doneChan := make(chan int, 1)
+	successChan := make(chan string, 5)
+	failChan := make(chan string, 5)
+	taskManager := NewTaskManager()
 
-	for i:=0; i<ntasks; i++  {
+	// 预生成所有task
+	for i:=0; i<ntasks; i++ {
 		task := DoTaskArgs{
-			JobName:jobName,
-			File:mapFiles[i],
-			Phase:phase,
-			TaskNumber:i,
-			NumOtherPhase:n_other,
+			JobName:       jobName,
+			File:          mapFiles[i],
+			Phase:         phase,
+			TaskNumber:    i,
+			NumOtherPhase: n_other,
 		}
-		log.Println("schedule: select")
-		select {
-		case newWorker := <-registerChan:
-			go submitTask(newWorker, task, &doneWorkers, &waiter)
-		case finishedWorker := <-doneWorkers:
-			go submitTask(finishedWorker, task, &doneWorkers, &waiter)
+		taskManager.Push(task)
+	}
+
+	avaiWks := availableWorkers(doneChan, registerChan, successChan, failChan)
+	for {
+		if !taskManager.Empty() {
+			select {
+			case worker := <-avaiWks:
+				waiter.Add(1)
+				go submitTask(worker, taskManager.Pop().(DoTaskArgs), &successChan, &failChan, taskManager, &waiter)
+			default:
+				continue
+			}
+		}
+		waiter.Wait()
+		if taskManager.Empty() {
+			log.Println("Schedule: finish all tasks successfully")
+			doneChan<-1
+			break
 		}
 	}
-	log.Println("Schedule: waiting for workers finish tasks")
-	waiter.Wait()
-
 	fmt.Printf("Schedule: %v done\n", phase)
 }
 
-func submitTask(worker string, task DoTaskArgs, doneWorkers *chan string, waiter *sync.WaitGroup)  {
-	log.Println("Schedule: submit task to worker ", worker)
-	waiter.Add(1)
-	call(worker, "Worker.DoTask", task, nil)
+func availableWorkers(done chan int,
+	register chan string,
+	success chan string,
+	fail chan string) chan string {
+	wks := make(chan string, 5)
 	go func() {
-		*doneWorkers<-worker
+		for {
+			select {
+			case <-done:
+				break
+			case worker := <-register:
+				wks<-worker
+			case worker := <-success:
+				wks<-worker
+			//case worker := <-fail:
+			//	wks<-worker
+			}
+		}
 	}()
-	waiter.Done()
+	return wks
+}
+
+func submitTask(worker string, task DoTaskArgs,
+	doneWorkers *chan string,
+	failWorkers *chan string,
+	taskManager *TaskManager,
+	waiter *sync.WaitGroup)  {
+
+	log.Println("Schedule: submit task to worker ", worker)
+	//waiter.Add(1)
+	defer waiter.Done()
+	isSuccess := call(worker, "Worker.DoTask", task, nil)
+	log.Printf("Schedule: result of task submitted worker[%s] with task[%d] is %t ",
+		worker, task.TaskNumber, isSuccess)
+	if isSuccess {
+		go func() {
+			log.Println("Schedule: before send successful signal")
+			*doneWorkers<-worker
+			log.Println("Schedule: after send successful signal")
+			//atomic.AddInt32(counter, -1)
+			//waiter.Done()
+		}()
+	} else {
+		go func() {
+			taskManager.Push(task)
+			*failWorkers<-worker
+			//atomic.AddInt32(counter, -1)
+			//waiter.Done()
+		}()
+	}
+
+	//waiter.Done()
 	log.Println("Schedule: worker finish task ", worker)
 }
