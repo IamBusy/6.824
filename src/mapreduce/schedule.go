@@ -59,6 +59,7 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 			case worker := <-avaiWks:
 				waiter.Add(1)
 				go submitTask(worker, taskManager.Pop().(DoTaskArgs), &successChan, &failChan, taskManager, &waiter)
+				continue
 			default:
 				continue
 			}
